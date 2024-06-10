@@ -1,5 +1,5 @@
 # image-reloader
-Quickly update kubernetes image based on pull/push mode
+Subscribe to image changes in k8s and update the controller
 
 ## Capabilities
 Currently it is used with harbor/webhook cloundevent, watch deployent, statefulset. 
