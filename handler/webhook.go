@@ -18,15 +18,17 @@ func InitWatcherService() *service.WatcherService {
 }
 
 func WebhookHandler(c *gin.Context) {
-
-	var event model.PushEvent
-	if err := c.BindJSON(&event); err != nil {
+	var event *model.PushEvent
+	err := c.BindJSON(&event)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// 将事件发送到更新处理器
-	watcherService.UpdateHandlerChan <- event
-
+	go func() {
+		watcherService.UpdateHandlerChan <- *event
+	}()
+	<-watcherService.UpdateHandlerDone
 	c.JSON(http.StatusOK, gin.H{"status": "event received"})
 }

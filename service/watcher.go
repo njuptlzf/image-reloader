@@ -122,16 +122,12 @@ func (ws *WatcherService) onAddOrUpdateDeployment(obj interface{}) {
 	ws.cacheMutex.Lock()
 	defer ws.cacheMutex.Unlock()
 	for _, container := range deploy.Spec.Template.Spec.Containers {
-		// 将镜像拆分成name和tag，保存到key
-		list := strings.Split(container.Image, ":")
-		if len(list) != 2 {
-			list = strings.Split(container.Image, "@")
-			if len(list) != 2 {
-				log.Printf("Invalid image format: %s", container.Image)
-				continue
-			}
+		imgName, imgTag := SplitImageNameAndTag(container.Image)
+		if len(imgTag) == 0 {
+			log.Printf("Invalid image format: %s", container.Image)
+			continue
 		}
-		imgName, imgTag := list[0], list[1]
+		log.Printf("onAddOrUpdateDeployment: %s", container.Image)
 		key := ResourceKey{
 			Namespace:     deploy.Namespace,
 			ResourceName:  deploy.Name,
@@ -140,11 +136,16 @@ func (ws *WatcherService) onAddOrUpdateDeployment(obj interface{}) {
 			ImageName:     imgName,
 			ImageTag:      imgTag,
 		}
-		for i, cache := range ws.ImageCache[imgName] {
-			if cache.ImageName == imgName && cache.ImageTag != imgTag {
-				ws.ImageCache[imgName][i] = key
-				break
+		caches, ok := ws.ImageCache[imgName]
+		if ok {
+			for i, cache := range caches {
+				if cache.ImageName == imgName && cache.ImageTag != imgTag {
+					ws.ImageCache[imgName][i] = key
+					break
+				}
 			}
+		} else {
+			ws.ImageCache[imgName] = append(ws.ImageCache[imgName], key)
 		}
 	}
 }
@@ -154,16 +155,18 @@ func (ws *WatcherService) onDeleteDeployment(obj interface{}) {
 	ws.cacheMutex.Lock()
 	defer ws.cacheMutex.Unlock()
 	for _, container := range deploy.Spec.Template.Spec.Containers {
-		list := strings.Split(container.Image, ":")
-		if len(list) != 2 {
-			list = strings.Split(container.Image, "@")
-			if len(list) != 2 {
-				log.Printf("Invalid image format: %s", container.Image)
-				continue
-			}
+		imgName, imgTag := SplitImageNameAndTag(container.Image)
+		if len(imgTag) == 0 {
+			log.Printf("Invalid image format: %s", container.Image)
+			continue
 		}
-		imgName, imgTag := list[0], list[1]
-		ws.ImageCache[imgName] = removeElement(ws.ImageCache[imgName], imgTag)
+		log.Printf("onDeleteDeployment: %s", container.Image)
+		cache := removeElement(ws.ImageCache[imgName], imgTag)
+		if len(cache) != 0 {
+			ws.ImageCache[imgName] = cache
+			continue
+		}
+		delete(ws.ImageCache, imgName)
 	}
 }
 
@@ -172,16 +175,12 @@ func (ws *WatcherService) onAddOrUpdateStatefulSet(obj interface{}) {
 	ws.cacheMutex.Lock()
 	defer ws.cacheMutex.Unlock()
 	for _, container := range ss.Spec.Template.Spec.Containers {
-		// 将镜像拆分成name和tag，保存到key
-		list := strings.Split(container.Image, ":")
-		if len(list) != 2 {
-			list = strings.Split(container.Image, "@")
-			if len(list) != 2 {
-				log.Printf("Invalid image format: %s", container.Image)
-				continue
-			}
+		imgName, imgTag := SplitImageNameAndTag(container.Image)
+		if len(imgTag) == 0 {
+			log.Printf("Invalid image format: %s", container.Image)
+			continue
 		}
-		imgName, imgTag := list[0], list[1]
+		log.Printf("AddOrUpdateStatefulSet: %s", container.Image)
 		key := ResourceKey{
 			Namespace:     ss.Namespace,
 			ResourceName:  ss.Name,
@@ -190,11 +189,16 @@ func (ws *WatcherService) onAddOrUpdateStatefulSet(obj interface{}) {
 			ImageName:     imgName,
 			ImageTag:      imgTag,
 		}
-		for i, cache := range ws.ImageCache[imgName] {
-			if cache.ImageName == imgName && cache.ImageTag != imgTag {
-				ws.ImageCache[imgName][i] = key
-				break
+		caches, ok := ws.ImageCache[imgName]
+		if ok {
+			for i, cache := range caches {
+				if cache.ImageName == imgName && cache.ImageTag != imgTag {
+					ws.ImageCache[imgName][i] = key
+					break
+				}
 			}
+		} else {
+			ws.ImageCache[imgName] = append(ws.ImageCache[imgName], key)
 		}
 	}
 }
@@ -204,16 +208,18 @@ func (ws *WatcherService) onDeleteStatefulSet(obj interface{}) {
 	ws.cacheMutex.Lock()
 	defer ws.cacheMutex.Unlock()
 	for _, container := range ss.Spec.Template.Spec.Containers {
-		list := strings.Split(container.Image, ":")
-		if len(list) != 2 {
-			list = strings.Split(container.Image, "@")
-			if len(list) != 2 {
-				log.Printf("Invalid image format: %s", container.Image)
-				continue
-			}
+		imgName, imgTag := SplitImageNameAndTag(container.Image)
+		if len(imgTag) == 0 {
+			log.Printf("Invalid image format: %s", container.Image)
+			continue
 		}
-		imgName, imgTag := list[0], list[1]
-		ws.ImageCache[imgName] = removeElement(ws.ImageCache[imgName], imgTag)
+		log.Printf("onDeleteStatefulSet: %s", container.Image)
+		cache := removeElement(ws.ImageCache[imgName], imgTag)
+		if len(cache) != 0 {
+			ws.ImageCache[imgName] = cache
+			continue
+		}
+		delete(ws.ImageCache, imgName)
 	}
 }
 
@@ -222,29 +228,24 @@ func (ws *WatcherService) handleUpdateEvents() {
 		ws.UpdateHandlerDone <- true
 	}()
 	for event := range ws.UpdateHandlerChan {
-		for _, image := range event.Resources {
-			list := strings.Split(image.ResourceURL, ":")
-			if len(list) != 2 {
-				list = strings.Split(image.ResourceURL, "@")
-				if len(list) != 2 {
-					log.Printf("Invalid image format: %s", image.ResourceURL)
-					continue
-				}
+		for _, image := range event.Data.Resources {
+			newName, newTag := SplitImageNameAndTag(image.ResourceURL)
+			if len(newTag) == 0 {
+				log.Printf("Invalid image format: %s", image.ResourceURL)
+				continue
 			}
-			// 目前只要前缀相同且tag不同就更新
-			newName, newTag := list[0], list[1]
-			// deployment滚动更新后缓存会更新
+			// deployment滚动更新后缓存就会更新
 			keys, exists := ws.ImageCache[newName]
 			if exists {
 				for _, key := range keys {
 					if key.ImageTag == newTag {
-						fmt.Printf("Image already exists: %s/%s:%s\n", key.Namespace, key.ResourceName, key.ContainerName)
+						fmt.Printf("(%s)Image already exists: %s:%s\n", key.ContainerName, key.ImageName, key.ImageTag)
 						continue
 					}
 
 					// 滚动更新K8s实例
 					ws.updateK8sInstance(key, image.ResourceURL)
-					fmt.Printf("Image updated: %s/%s:%s -> %s\n", key.Namespace, key.ResourceName, key.ContainerName, image.ResourceURL)
+					fmt.Printf("(%s)Image updated: %s:%s -> %s\n", key.ContainerName, key.ImageName, key.ImageTag, image.ResourceURL)
 				}
 			}
 		}
@@ -283,7 +284,7 @@ func (ws *WatcherService) updateK8sInstance(key ResourceKey, newImage string) {
 // 删除等于指定值的元素
 func removeElement(arr []ResourceKey, value string) []ResourceKey {
 	// 创建一个新的切片，用于存储不等于指定值的元素
-	result := []ResourceKey{}
+	var result []ResourceKey
 
 	// 遍历原始切片，检查每个元素
 	for _, v := range arr {
@@ -295,4 +296,32 @@ func removeElement(arr []ResourceKey, value string) []ResourceKey {
 
 	// 返回结果切片
 	return result
+}
+
+// SplitImageNameAndTag 根据最后一个':'分隔符分割镜像字符串，返回镜像名称和标签。
+func SplitImageNameAndTag(image string) (string, string) {
+	// 检查输入是否合法
+	if image == "" {
+		return "", ""
+	}
+
+	// 找到最后一个':'的位置
+	lastColonIndex := strings.LastIndex(image, ":")
+
+	// 如果没有找到':'，则可能是hash结尾, 即 @ 为分隔符
+	if lastColonIndex == -1 {
+		lastAtIndex := strings.LastIndex(image, "@")
+		if lastAtIndex == -1 {
+			return image, ""
+		}
+		name := image[:lastAtIndex]
+		tag := image[lastAtIndex+1:]
+		return name, tag
+	}
+
+	// 分别获取name和tag
+	name := image[:lastColonIndex]
+	tag := image[lastColonIndex+1:]
+
+	return name, tag
 }

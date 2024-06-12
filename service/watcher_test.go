@@ -72,16 +72,18 @@ func TestHandleUpdateEvents(t *testing.T) {
 
 	// 向UpdateHandlerChan发送一个新的push event
 	event := model.PushEvent{
-		Resources: []model.Image{{Digest: "sha256:dummy", Tag: newTag, ResourceURL: completedNewName}},
-		Repository: struct {
-			DateCreated  int64  `json:"date_created"`
-			Name         string `json:"name"`
-			Namespace    string `json:"namespace"`
-			RepoFullName string `json:"repo_full_name"`
-			RepoType     string `json:"repo_type"`
-		}{
-			Name:      deployName,
-			Namespace: namespace,
+		Data: model.Data{
+			Resources: []model.Image{{Digest: "sha256:dummy", Tag: newTag, ResourceURL: completedNewName}},
+			Repository: struct {
+				DateCreated  int64  `json:"date_created"`
+				Name         string `json:"name"`
+				Namespace    string `json:"namespace"`
+				RepoFullName string `json:"repo_full_name"`
+				RepoType     string `json:"repo_type"`
+			}{
+				Name:      deployName,
+				Namespace: namespace,
+			},
 		},
 	}
 

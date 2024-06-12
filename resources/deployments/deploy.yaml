@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: image-reloader
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: image-reloader
+  namespace: image-reloader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: image-reloader-cluster-admin-binding
+subjects:
+- kind: ServiceAccount
+  name: image-reloader
+  namespace: image-reloader
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-reloader
+  namespace: image-reloader
+  labels:
+    app: image-reloader
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-reloader
+  template:
+    metadata:
+      labels:
+        app: image-reloader
+    spec:
+      serviceAccountName: image-reloader
+      imagePullSecrets:
+      - name: private-registry
+      containers:
+      - name: image-reloader
+        image: docker.io/kakalzf377/image-reloader:v0.1.0
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+          hostPort: 8888
+          hostIP: 0.0.0.0
